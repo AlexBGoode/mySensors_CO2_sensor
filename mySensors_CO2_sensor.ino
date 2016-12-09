@@ -21,13 +21,14 @@
 #define MY_RADIO_NRF24
 
 #include <SPI.h>
-//#include <MySensors.h>
+#include <MySensors.h>
 #define CHILD_ID_AIQ      1
 
-#define SLEEP_TIME        10*1000 // Sleep time between reports (in milliseconds)
+#define SLEEP_TIME        11*1000 // Sleep time between reports (in milliseconds)
 
-#define CO2_RX            A1  // RX сенсора CO2
-#define CO2_TX            A0  // TX сенсора CO2
+#define CO2_RX            A0  // RX сенсора CO2
+#define CO2_TX            A1  // TX сенсора CO2
+#define pinPWM            A3
 #include <SoftwareSerial.h>
 SoftwareSerial co2Serial( CO2_RX, CO2_TX ); // RX, TX сенсора CO2
 
@@ -35,18 +36,25 @@ byte command[9] = {0xFF, 0x01, 0x86, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79};
 byte response[9];
 
 // Initialize Air Quality message
-//MyMessage msgPPM( CHILD_ID_AIQ, V_LEVEL );
+MyMessage msgPPM( CHILD_ID_AIQ, V_LEVEL );
 
 
 void presentation()
+//void setup()
 {
+//  Serial.begin(9600);
   // Send the sketch version information to the gateway and Controller
-//  sendSketchInfo( "AIQ Sensor CO2 MH-Z14", "1.0" );
+  sendSketchInfo( "AIQ Sensor CO2 MH-Z19", "1.0" );
 
   // Register all sensors to gw (they will be created as child devices)
-//  present( CHILD_ID_AIQ, S_AIR_QUALITY );
+  present( CHILD_ID_AIQ, S_AIR_QUALITY );
 
+  pinMode(pinPWM, INPUT);
   co2Serial.begin(9600);
+//  pinMode(2, OUTPUT);
+//  digitalWrite(2, HIGH); 
+//  pinMode(3, OUTPUT);
+//  digitalWrite(3, HIGH); 
 }
 
 
@@ -56,14 +64,16 @@ void loop()
 
   int co2ppm = readCO2_UART();
   Serial.println( co2ppm );
+
   // Report changes more than 10 ppm
   if (( co2ppm != lastReading ) && ( abs( co2ppm - lastReading ) >= 10 )) {
-//    send( msgPPM.set( co2ppm ));
+    send( msgPPM.set( co2ppm ));
     lastReading = co2ppm;
   }
-
-  co2ppm = readCO2_PWM( 2000 );
-  Serial.println( co2ppm );
+//
+//  int co2ppm2 = readCO2_PWM( 2000 );
+//  Serial.print( "PPM: ");
+//  Serial.println( co2ppm2 );
 
 //  sleep( SLEEP_TIME );
   delay( SLEEP_TIME );
@@ -77,31 +87,26 @@ int readCO2_UART()
   // http://eleparts.co.kr/data/design/product_file/SENSOR/gas/MH-Z19_CO2%20Manual%20V2.pdf
 
   static byte command[ 9 ] = { 0xFF, 0x01, 0x86, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79 };
-  static byte response[ 9 ];
+  static unsigned char response[ 9 ];
 
-  co2Serial.write( command, 9 );        // request PPM CO2
-  co2Serial.readBytes( response, 9 );   // read the response
+  co2Serial.write(command, 9);
+  memset(response, 0, 9);
+  co2Serial.readBytes(response, 9);
+  int i;
+  byte crc = 0;
+  for (i = 1; i < 8; i++) crc+=response[i];
+  crc = 255 - crc;
+  crc++;
 
-  //  First byte fixed to 0xFF
-  if ( response[0] != 0xFF ) {
-    Serial.println( "Wrong starting byte from co2 sensor!" );
+  if ( !(response[0] == 0xFF && response[1] == 0x86 && response[8] == crc) ) {
+    Serial.println("CRC error: " + String(crc) + " / "+ String(response[8]));
     return -1;
+  } else {
+    unsigned int responseHigh = (unsigned int) response[2];
+    unsigned int responseLow = (unsigned int) response[3];
+    int ppm = (256*responseHigh) + responseLow;
+    return ppm;
   }
-
-  //  Command List
-  //    0x86 Gas Concentration
-  //    0x87 Calibrate zero point (ZERO)
-  //    0x88 Calibrate Command List
-
-  if ( response[1] != 0x86 ) {
-    Serial.println( "Wrong command from co2 sensor!" );
-    return -2;
-  }
-
-  int responseHigh = (int) response[ 2 ];
-  int responseLow = (int) response[ 3 ];
-  int ppm = ( 256 * responseHigh ) + responseLow;
-  return ppm;
 }
 
 
@@ -119,7 +124,10 @@ int readCO2_PWM(int ppmLimit)
     // pulsein reada a pulse within a timeout in microseconds
     // and returns the length of the pulse (in microseconds)
     // or 0 if no pulse is completed before the timeout 
-    Th = pulseIn( A1, HIGH, 1004000 ) / 1000; // in ms
+    Th = pulseIn( pinPWM, HIGH, 1004000 ) / 1000; // in ms
+//    Th = pulseIn( pinPWM, HIGH ); // in ms
+    Serial.print( '.' );
+    Serial.print( Th );
 
     Tl = 1004 - Th;
     ppm = ppmLimit * ( Th - 2 ) / ( Th + Tl - 4 );
@@ -138,4 +146,5 @@ byte getCheckSum(byte *packet)
   checksum += 1;              // increase by one
   return checksum;
 }
+
 
